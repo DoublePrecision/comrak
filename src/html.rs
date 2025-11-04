@@ -25,6 +25,11 @@ use crate::nodes::{
 };
 use crate::parser::options::{Options, Plugins};
 use crate::{node_matches, scanners};
+use typst::foundations::{Bytes, Smart};
+use typst::syntax::{Source, Span};
+use typst::World;
+use typst_svg::svg;
+use typst_kit::package
 
 #[doc(hidden)]
 pub use anchorizer::Anchorizer;
@@ -1319,6 +1324,35 @@ fn render_escaped_tag<T>(
     Ok(ChildRendering::HTML)
 }
 
+fn render_math_to_svg(
+    math_content: &str,
+    display: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    // Wrap in appropriate Typst math delimiters
+    let typst_content = if display {
+        format!("$ {} $", math_content)
+    } else {
+        format!("$ {} $", math_content)
+    };
+
+    // Create a Typst source
+    let source = Source::detached(&typst_content);
+
+    // Parse and compile
+    let world = SystemWorld::new(); // You'll need to implement this
+    let document = typst::compile(&world);
+
+    let document = document.output;
+
+    // Render first page to SVG
+    if let Some(frame) = document.pages.first() {
+        let svg_str = typst_svg::svg(&frame.frame);
+        Ok(svg_str)
+    } else {
+        Err("No pages generated".into())
+    }
+}
+
 /// Renders a math dollar inline, `$...$` and `$$...$$` using `<span>` to be
 /// similar to other renderers.
 pub fn render_math<'a, T>(
@@ -1328,22 +1362,43 @@ pub fn render_math<'a, T>(
     nm: &NodeMath,
 ) -> Result<ChildRendering, fmt::Error> {
     if entering {
-        let mut tag_attributes: Vec<(&str, Cow<str>)> = Vec::new();
-        let style_attr = if nm.display_math { "display" } else { "inline" };
-        let tag: &str = if nm.dollar_math { "span" } else { "code" };
+        match render_math_to_svg(&nm.literal, nm.display_math) {
+            Ok(svg) => {
+                let wrapper_tag = if nm.display_math { "div" } else { "span" };
+                let class = if nm.display_math {
+                    "math-display text-center block my-4"
+                } else {
+                    "math-inline inline-block align-middle"
+                };
 
-        tag_attributes.push(("data-math-style", style_attr.into()));
+                write!(context, "<{} class=\"{}\">", wrapper_tag, class)?;
 
-        if context.options.render.sourcepos {
-            let ast = node.data();
-            tag_attributes.push(("data-sourcepos", ast.sourcepos.to_string().into()));
+                // Write SVG directly without escaping
+                write!(context, "{}", svg)?;
+
+                write!(context, "</{}>", wrapper_tag)?;
+            }
+            Err(e) => {
+                // Fallback: show original math with error styling
+                let tag = if nm.dollar_math { "span" } else { "code" };
+                let style_attr = if nm.display_math { "display" } else { "inline" };
+
+                let mut tag_attributes: Vec<(&str, Cow<str>)> = Vec::new();
+                tag_attributes.push(("data-math-style", style_attr.into()));
+                tag_attributes.push(("class", "math-error".into()));
+                tag_attributes.push(("title", format!("Typst error: {}", e).into()));
+
+                if context.options.render.sourcepos {
+                    let ast = node.data();
+                    tag_attributes.push(("data-sourcepos", ast.sourcepos.to_string().into()));
+                }
+
+                write_opening_tag(context, tag, tag_attributes.into_iter())?;
+                context.escape(&nm.literal)?;
+                write!(context, "</{}>", tag)?;
+            }
         }
-
-        write_opening_tag(context, tag, tag_attributes.into_iter())?;
-        context.escape(&nm.literal)?;
-        write!(context, "</{tag}>")?;
     }
-
     Ok(ChildRendering::HTML)
 }
 
@@ -1355,31 +1410,39 @@ pub fn render_math_code_block<'a, T>(
 ) -> Result<ChildRendering, fmt::Error> {
     context.cr()?;
 
-    // use vectors to ensure attributes always written in the same order,
-    // for testing stability
-    let mut pre_attributes: Vec<(&str, Cow<str>)> = Vec::new();
-    let mut code_attributes: Vec<(&str, Cow<str>)> = Vec::new();
-    let lang_str = "math";
+    match render_math_to_svg(literal, true) {
+        Ok(svg) => {
+            let mut div_attributes: Vec<(&str, Cow<str>)> = Vec::new();
+            div_attributes.push(("class", "math-code-block text-center block my-4".into()));
 
-    if context.options.render.github_pre_lang {
-        pre_attributes.push(("lang", lang_str.into()));
-        pre_attributes.push(("data-math-style", "display".into()));
-    } else {
-        let code_attr = format!("language-{}", lang_str);
-        code_attributes.push(("class", code_attr.into()));
-        code_attributes.push(("data-math-style", "display".into()));
+            if context.options.render.sourcepos {
+                let ast = node.data();
+                div_attributes.push(("data-sourcepos", ast.sourcepos.to_string().into()));
+            }
+
+            write_opening_tag(context, "div", div_attributes.into_iter())?;
+            write!(context, "{}", svg)?;
+            context.write_str("</div>\n")?;
+        }
+        Err(e) => {
+            // Fallback
+            let mut pre_attributes: Vec<(&str, Cow<str>)> = Vec::new();
+            let mut code_attributes: Vec<(&str, Cow<str>)> = Vec::new();
+
+            code_attributes.push(("class", "language-math math-error".into()));
+            code_attributes.push(("title", format!("Typst error: {}", e).into()));
+
+            if context.options.render.sourcepos {
+                let ast = node.data();
+                pre_attributes.push(("data-sourcepos", ast.sourcepos.to_string().into()));
+            }
+
+            write_opening_tag(context, "pre", pre_attributes.into_iter())?;
+            write_opening_tag(context, "code", code_attributes.into_iter())?;
+            context.escape(literal)?;
+            context.write_str("</code></pre>\n")?;
+        }
     }
-
-    if context.options.render.sourcepos {
-        let ast = node.data();
-        pre_attributes.push(("data-sourcepos", ast.sourcepos.to_string().into()));
-    }
-
-    write_opening_tag(context, "pre", pre_attributes.into_iter())?;
-    write_opening_tag(context, "code", code_attributes.into_iter())?;
-
-    context.escape(literal)?;
-    context.write_str("</code></pre>\n")?;
 
     Ok(ChildRendering::HTML)
 }
