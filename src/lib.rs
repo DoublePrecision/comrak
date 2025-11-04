@@ -71,6 +71,7 @@ pub mod arena_tree;
 pub mod html;
 pub mod nodes;
 pub mod plugins;
+mod world;
 
 mod character_set;
 mod cm;

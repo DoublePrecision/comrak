@@ -24,12 +24,10 @@ use crate::nodes::{
     NodeWikiLink, TableAlignment,
 };
 use crate::parser::options::{Options, Plugins};
+use crate::world::{MinimalWorld, TypstMathError};
 use crate::{node_matches, scanners};
-use typst::foundations::{Bytes, Smart};
-use typst::syntax::{Source, Span};
-use typst::World;
-use typst_svg::svg;
-use typst_kit::package
+use typst::layout::PagedDocument;
+use typst_svg::svg_frame;
 
 #[doc(hidden)]
 pub use anchorizer::Anchorizer;
@@ -1324,32 +1322,36 @@ fn render_escaped_tag<T>(
     Ok(ChildRendering::HTML)
 }
 
-fn render_math_to_svg(
-    math_content: &str,
-    display: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
-    // Wrap in appropriate Typst math delimiters
-    let typst_content = if display {
-        format!("$ {} $", math_content)
-    } else {
-        format!("$ {} $", math_content)
-    };
+fn render_math_to_svg(math_content: &str, _display: bool) -> Result<String, TypstMathError> {
+    let math_content = format!(
+        r#"
+#set page(width: auto, height: auto, margin: 0pt)
+#set text(font: "New Computer Modern Math", size: 16pt)
 
-    // Create a Typst source
-    let source = Source::detached(&typst_content);
+$ {math_content} $
+"#
+    );
 
-    // Parse and compile
-    let world = SystemWorld::new(); // You'll need to implement this
-    let document = typst::compile(&world);
+    let world = MinimalWorld::new(math_content);
+    let result = typst::compile::<PagedDocument>(&world);
 
-    let document = document.output;
+    match result.output {
+        Ok(p) => {
+            let frame = p.pages.get(0);
+            match frame {
+                Some(p) => {
+                    let mut svg = svg_frame(&p.frame);
+                    svg = svg
+                        .replace("fill=\"#000000\"", "fill=\"currentColor\"")
+                        .replace("stroke=\"#000000\"", "stroke=\"currentColor\"")
+                        .replace("<svg", "<svg style=\"display: block; margin: 0 auto;\"");
 
-    // Render first page to SVG
-    if let Some(frame) = document.pages.first() {
-        let svg_str = typst_svg::svg(&frame.frame);
-        Ok(svg_str)
-    } else {
-        Err("No pages generated".into())
+                    Ok(svg)
+                }
+                None => return Err(TypstMathError),
+            }
+        }
+        Err(_) => Err(TypstMathError),
     }
 }
 
@@ -1383,7 +1385,7 @@ pub fn render_math<'a, T>(
                 let tag = if nm.dollar_math { "span" } else { "code" };
                 let style_attr = if nm.display_math { "display" } else { "inline" };
 
-                let mut tag_attributes: Vec<(&str, Cow<str>)> = Vec::new();
+                let mut tag_attributes: Vec<(&str, Cow<str>)> = Vec::with_capacity(3);
                 tag_attributes.push(("data-math-style", style_attr.into()));
                 tag_attributes.push(("class", "math-error".into()));
                 tag_attributes.push(("title", format!("Typst error: {}", e).into()));
