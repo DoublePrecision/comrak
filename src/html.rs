@@ -1322,15 +1322,26 @@ fn render_escaped_tag<T>(
     Ok(ChildRendering::HTML)
 }
 
-fn render_math_to_svg(math_content: &str, _display: bool) -> Result<String, TypstMathError> {
-    let math_content = format!(
-        r#"
+fn render_math_to_svg(math_content: &str, display: bool) -> Result<String, TypstMathError> {
+    let math_content = if display {
+        format!(
+            r#"
+#set page(width: auto, height: auto, margin: 0pt)
+#set text(font: "New Computer Modern Math", size: 14pt)
+
+${math_content}$
+"#
+        )
+    } else {
+        format!(
+            r#"
 #set page(width: auto, height: auto, margin: 0pt)
 #set text(font: "New Computer Modern Math", size: 14pt)
 
 $ {math_content} $
 "#
-    );
+        )
+    };
 
     let world = MinimalWorld::new(math_content);
     let result = typst::compile::<PagedDocument>(&world);

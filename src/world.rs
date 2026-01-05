@@ -36,7 +36,7 @@ pub struct MinimalWorld {
 
 fn preload() -> PartialLazyWorld {
     let mut book = FontBook::new();
-    let mut fonts = Vec::new();
+    let mut fonts = vec![];
 
     let buffer = Bytes::new(include_bytes!("../NewCMMath-Regular.otf"));
     for font in Font::iter(buffer) {
