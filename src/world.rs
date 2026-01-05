@@ -38,11 +38,11 @@ fn preload() -> PartialLazyWorld {
     let mut book = FontBook::new();
     let mut fonts = vec![];
 
-    let buffer = Bytes::new(include_bytes!("../NewCMMath-Regular.otf"));
-    for font in Font::iter(buffer) {
-        book.push(font.info().clone());
-        fonts.push(font);
-    }
+    // let buffer = Bytes::new(include_bytes!("../NewCMMath-Regular.otf"));
+    // for font in Font::iter(buffer) {
+    //     book.push(font.info().clone());
+    //     fonts.push(font);
+    // }
 
     let fonts = fonts.into_boxed_slice();
 
