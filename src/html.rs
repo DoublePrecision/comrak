@@ -1338,7 +1338,7 @@ $ {math_content} $
 #set page(width: auto, height: auto, margin: 0pt)
 #set text(font: "New Computer Modern Math", size: 14pt)
 
-$ {math_content} $
+${math_content}$
 "#
         )
     };
